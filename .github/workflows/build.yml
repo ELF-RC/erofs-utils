@@ -1,0 +1,218 @@
+name: Build erofs-utils on Ubuntu 22.04
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Linux/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-22.04
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+    env:
+      TZ: UTC
+      BUILD_ARCH: ${{ matrix.arch }}
+
+    steps:
+      - name: Initialize build logs
+        if: always()
+        shell: bash
+        run: |
+          LOG_DIR="${RUNNER_TEMP}/build-logs"
+          mkdir -p "${LOG_DIR}"
+          echo "LOG_DIR=${LOG_DIR}" >> "${GITHUB_ENV}"
+          {
+            echo "Workflow started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "Runner: ${RUNNER_NAME:-unknown}"
+            echo "Architecture: ${BUILD_ARCH}"
+          } > "${LOG_DIR}/workflow.log"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee -a "${LOG_DIR}/dependencies.log") 2>&1
+
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            ccache \
+            git \
+            lld \
+            ninja-build \
+            patch \
+            pkg-config \
+            python3 \
+            python3-venv
+
+          cmake_venv="${RUNNER_TEMP}/cmake-venv"
+          python3 -m venv "${cmake_venv}"
+          "${cmake_venv}/bin/python" -m pip install \
+            --disable-pip-version-check \
+            --upgrade \
+            "cmake==3.29.3"
+          echo "${cmake_venv}/bin" >> "${GITHUB_PATH}"
+          export PATH="${cmake_venv}/bin:${PATH}"
+
+          echo '--- cmake ---'
+          cmake --version
+          echo '--- ninja ---'
+          ninja --version
+          echo '--- clang ---'
+          clang --version
+          echo '--- compiler target ---'
+          clang -dumpmachine
+
+      - name: Build Linux/${{ matrix.arch }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee -a "${LOG_DIR}/build.log") 2>&1
+
+          root_dir="${GITHUB_WORKSPACE}"
+          build_dir="${root_dir}/build/cmake"
+          out="${root_dir}/out"
+          version="v$(cd "${root_dir}" && ./scripts/get-version-number)"
+          jobs="${JOBS:-$(nproc)}"
+
+          case "${BUILD_ARCH}" in
+            amd64)
+              cmake_processor="x86_64"
+              ;;
+            arm64)
+              cmake_processor="aarch64"
+              ;;
+            *)
+              echo "Unsupported Linux architecture: ${BUILD_ARCH}" >&2
+              exit 2
+              ;;
+          esac
+
+          echo "Building erofs-utils ${version} for Linux/${BUILD_ARCH}"
+          echo "Source directory: ${root_dir}"
+          echo "Build directory: ${out}"
+
+          cd "${root_dir}"
+          git submodule update --init --recursive
+          rm -rf "${out}"
+
+          cmake_args=(
+            -S "${build_dir}"
+            -B "${out}"
+            -G Ninja
+            -DCMAKE_SYSTEM_NAME=Linux
+            -DCMAKE_SYSTEM_PROCESSOR="${cmake_processor}"
+            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_C_COMPILER=clang
+            -DCMAKE_CXX_COMPILER=clang++
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            -DENABLE_FULL_LTO=ON
+            -DMAX_BLOCK_SIZE=4096
+          )
+
+          if [[ "${BUILD_ARCH}" == "arm64" ]]; then
+            cmake_args+=(
+              -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu
+              -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu
+              -DCMAKE_ASM_COMPILER_TARGET=aarch64-linux-gnu
+            )
+          fi
+
+          cmake "${cmake_args[@]}"
+          cmake --build "${out}" --parallel "${jobs}"
+
+          build_output="${out}/erofs-tools"
+          binaries=(
+            dump.erofs
+            fsck.erofs
+            fuse.erofs
+            mkfs.erofs
+            extract.erofs
+          )
+          for binary in "${binaries[@]}"; do
+            if [[ ! -f "${build_output}/${binary}" ]]; then
+              echo "Missing build output: ${build_output}/${binary}" >&2
+              exit 1
+            fi
+          done
+
+          target_name="erofs-utils-${version}-$(TZ=UTC-8 date +%y%m%d)-Linux_${BUILD_ARCH}"
+          target_dir="${root_dir}/target/Linux_${BUILD_ARCH}/${target_name}"
+          rm -rf "${root_dir}/target/Linux_${BUILD_ARCH}"
+          mkdir -p "${target_dir}"
+          cp -af "${build_output}"/*.erofs "${target_dir}/"
+          touch -c -d "2009-01-01 00:00:00" "${target_dir}"/*.erofs
+
+          echo "Build succeeded: ${target_dir}"
+          ls -lah "${target_dir}"
+
+      - name: Prepare binary artifact
+        if: success()
+        id: metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee -a "${LOG_DIR}/artifact.log") 2>&1
+
+          version="$(./scripts/get-version-number)"
+          build_date="$(date -u +%Y%m%d)"
+          artifact_name="erofs-utils_${version}_${BUILD_ARCH}_${build_date}"
+          binary_dir="${RUNNER_TEMP}/binaries"
+          mkdir -p "${binary_dir}"
+          find "target/Linux_${BUILD_ARCH}" -type f -name '*.erofs' -exec cp -af {} "${binary_dir}/" \;
+          test -n "$(find "${binary_dir}" -maxdepth 1 -type f -print -quit)"
+          {
+            echo "version=${version}"
+            echo "build_date=${build_date}"
+            echo "artifact_name=${artifact_name}"
+          } >> "${GITHUB_OUTPUT}"
+          ls -lah "${binary_dir}"
+
+      - name: Upload binaries
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.metadata.outputs.artifact_name }}
+          path: ${{ runner.temp }}/binaries/*
+          if-no-files-found: error
+          compression-level: 9
+
+      - name: Finalize build logs
+        if: always()
+        shell: bash
+        run: |
+          LOG_DIR="${RUNNER_TEMP}/build-logs"
+          {
+            echo "Workflow finished: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo "Job status: ${{ job.status }}"
+          } >> "${LOG_DIR}/workflow.log"
+          find "${LOG_DIR}" -maxdepth 1 -type f -size 0 -exec sh -c 'printf "(empty log)\\n" > "$1"' _ {} \;
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.arch }}
+          path: ${{ runner.temp }}/build-logs/*
+          if-no-files-found: error
+          compression-level: 9
