@@ -18,7 +18,7 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-22.04
-          - arch: arm64
+          - arch: aarch64
             runner: ubuntu-22.04-arm
     env:
       TZ: UTC
@@ -98,7 +98,7 @@ jobs:
             amd64)
               cmake_processor="x86_64"
               ;;
-            arm64)
+            aarch64)
               cmake_processor="aarch64"
               ;;
             *)
@@ -130,7 +130,7 @@ jobs:
             -DMAX_BLOCK_SIZE=4096
           )
 
-          if [[ "${BUILD_ARCH}" == "arm64" ]]; then
+          if [[ "${BUILD_ARCH}" == "aarch64" ]]; then
             cmake_args+=(
               -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu
               -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu
