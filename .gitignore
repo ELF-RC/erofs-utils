@@ -1,50 +1,52 @@
-.*
-*~
-*.[ao]
-*.diff
-*.la
+# Generated build output
+/out/
+/target/
+/.deps/
+/.libs/
+/autom4te.cache/
+
+# Autotools-generated state (source/build-definition files remain trackable)
+/config.log
+/config.status
+/config.cache
+/stamp-h
+/stamp-h1
+
+# CMake state accidentally generated in the source build directory
+/build/cmake/CMakeCache.txt
+/build/cmake/CMakeFiles/
+/build/cmake/cmake_install.cmake
+
+# Compiler and linker artifacts
+*.o
+*.a
 *.lo
-*.mod.c
-*.orig
-*.patch
-*.rej
+*.la
 *.so
+*.so.*
 *.so.dbg
-*.tar.*
+*.dylib
+*.gch
+*.gcda
+*.gcno
+*.gcov
 
-#
-# We don't want to ignore the following even if they are dot-files
-#
-!.mailmap
-
-#
-# Generated files
-#
-aclocal.m4
-autom4te.cache
-config.*
-Makefile
-Makefile.in
-config/
-m4/
-configure
-configure.scan
-libtool
-stamp-h
-stamp-h1
+# Generated binaries in source directories
 /mkfs/mkfs.erofs
 /fuse/erofsfuse
+/fuse/fuse.erofs
 /dump/dump.erofs
 /fsck/fsck.erofs
 /mount/mount.erofs
+/extract/extract.erofs
 /contrib/stress
-*.erofs
-*.bak
-CMakeCache.txt
-CMakeFiles
-cmake_install.cmake
-out/
-*release*/
-*debug*/
-*.zip
-erofs-utils-version.h
+/erofs-utils-version.h
+
+# Local editor and operating-system files
+*~
+*.swp
+*.swo
+*.orig
+*.rej
+.DS_Store
+Thumbs.db
