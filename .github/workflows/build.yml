@@ -91,7 +91,7 @@ jobs:
           root_dir="${GITHUB_WORKSPACE}"
           build_dir="${root_dir}/build/cmake"
           out="${root_dir}/out"
-          version="v$(cd "${root_dir}" && ./scripts/get-version-number)"
+          version="$(git -C "${root_dir}" describe --tags --abbrev=0)"
           jobs="${JOBS:-$(nproc)}"
 
           case "${BUILD_ARCH}" in
@@ -174,7 +174,7 @@ jobs:
           set -Eeuo pipefail
           exec > >(tee -a "${LOG_DIR}/artifact.log") 2>&1
 
-          version="$(./scripts/get-version-number)"
+          version="$(git describe --tags --abbrev=0)"
           build_date="$(date -u +%Y%m%d)"
           artifact_name="erofs-utils_${version}_${BUILD_ARCH}_${build_date}"
           binary_dir="${RUNNER_TEMP}/binaries"
